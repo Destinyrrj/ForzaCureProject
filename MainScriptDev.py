@@ -5,9 +5,11 @@ import psutil
 import time
 import webbrowser
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 import json
 import os
+import threading
+
 # Suppress the specific SyntaxWarning from pywinauto
 warnings.filterwarnings("ignore", category=SyntaxWarning, message="invalid escape sequence '\\;'")
 
@@ -33,7 +35,7 @@ FORZA_EDITIONS = {
 
 def execute_command(cmd, success_msg, error_msg):
     try:
-        subprocess.run(cmd, check=True)
+        subprocess.Popen(cmd, shell=True)
         logger.info(success_msg)
         return True
     except subprocess.CalledProcessError as e:
@@ -49,20 +51,18 @@ def start_forza(edition):
         logger.error(f"Error starting {edition}: {str(e)}")
         return False
 
+def get_process_names(edition):
+    return [name.lower() for name in FORZA_EDITIONS[edition]["process_names"]]
+
 def is_forza_running(edition):
-    for proc in psutil.process_iter(['name']):
-        if proc.info['name'].lower() in FORZA_EDITIONS[edition]["process_names"]:
-            return True
-    return False
+    process_names = get_process_names(edition)
+    return any(proc.name().lower() in process_names for proc in psutil.process_iter(['name']))
 
 def kill_explorer():
-    return execute_command(["taskkill", "/f", "/im", "explorer.exe"], "Explorer.exe killed", "Failed to kill explorer.exe")
+    return execute_command("taskkill /f /im explorer.exe", "Explorer.exe killed", "Failed to kill explorer.exe")
 
 def start_explorer():
-    return execute_command(["explorer.exe"], "Explorer.exe started", "Failed to start explorer.exe")
-
-import tkinter as tk
-from tkinter import messagebox
+    return execute_command("explorer.exe", "Explorer.exe started", "Failed to start explorer.exe")
 
 class ForzaLauncher:
     def __init__(self, master):
@@ -78,6 +78,8 @@ class ForzaLauncher:
 
         self.launch_button = ttk.Button(master, text="Launch", command=self.launch_forza)
         self.launch_button.pack(pady=10)
+
+        self.forza_monitor_timer = None
 
     def launch_forza(self):
         edition = self.combo.get()
@@ -103,23 +105,30 @@ class ForzaLauncher:
             self.show_error_message(f"An unexpected error occurred: {str(e)}")
 
     def wait_for_forza_start(self, edition, timeout=60):
-        for _ in range(timeout):
+        start_time = time.time()
+        while time.time() - start_time < timeout:
             if is_forza_running(edition):
                 return True
             time.sleep(1)
         return False
 
     def monitor_forza(self, edition):
-        while is_forza_running(edition):
-            time.sleep(5)
-        logger.info(f"{edition} process not found. Starting explorer.exe")
-        start_explorer()
-        logger.info("Exiting application")
-        self.master.quit()
+        if is_forza_running(edition):
+            self.forza_monitor_timer = threading.Timer(5.0, self.monitor_forza, [edition])
+            self.forza_monitor_timer.start()
+        else:
+            logger.info(f"{edition} process not found. Starting explorer.exe")
+            start_explorer()
+            logger.info("Exiting application")
+            self.master.quit()
 
     def show_error_message(self, message):
         messagebox.showerror("Error", f"{message}\nThe application will now exit.")
         self.master.quit()
+
+    def cleanup(self):
+        if self.forza_monitor_timer:
+            self.forza_monitor_timer.cancel()
 
 def main(edition):
     if edition not in FORZA_EDITIONS:
@@ -128,45 +137,21 @@ def main(edition):
         return False
 
     try:
-        # Start Forza
-        if not start_forza(edition):
+        if not start_forza(edition) or not wait_for_forza_start(edition):
             print(f"Error: Failed to start {edition}")
             return False
 
-        # Wait for Forza to start
-        forza_started = False
-        for _ in range(60):  # Wait up to 60 seconds
-            if is_forza_running(edition):
-                forza_started = True
-                break
-            time.sleep(1)
-
-        if not forza_started:
-            print(f"Error: {edition} did not start within the expected time")
-            return False
-
-        # Kill Explorer
         explorer_killed = kill_explorer()
 
-        if explorer_killed and forza_started:
-            msg = "Успешно"
-        elif explorer_killed and not forza_started:
-            msg = "Ошибка запуска приложения"
-        elif not explorer_killed and forza_started:
-            msg = "Ошибка завершения explorer.exe"
-        else:
-            msg = "Ни одна из частей не была выполнена"
+        status_message = "Успешно" if explorer_killed else "Ошибка завершения explorer.exe"
+        print(f"Status: {status_message}")
+        logger.info(f"Initial status: explorer_killed={explorer_killed}")
 
-        print(f"Status: {msg}")
-        logger.info(f"Initial status: explorer_killed={explorer_killed}, forza_started={forza_started}")
-
-        # Continuously check if Forza is running
-        while True:
-            if not is_forza_running(edition):
-                logger.info(f"{edition} process not found. Starting explorer.exe")
-                start_explorer()
-                break
+        while is_forza_running(edition):
             time.sleep(5)
+
+        logger.info(f"{edition} process not found. Starting explorer.exe")
+        start_explorer()
 
         return True
 
@@ -179,8 +164,19 @@ def main(edition):
 
     return False
 
+def wait_for_forza_start(edition, timeout=60):
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        if is_forza_running(edition):
+            return True
+        time.sleep(1)
+    return False
+
 if __name__ == "__main__":
     root = tk.Tk()
-    root.resizable(False, False)  # This line makes the window non-resizable
+    root.resizable(False, False)
     app = ForzaLauncher(root)
-    root.mainloop()
+    try:
+        root.mainloop()
+    finally:
+        app.cleanup()
