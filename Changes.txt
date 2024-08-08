@@ -1,0 +1,19 @@
+In this text will be listed changes in ForzaCure versions:
+
+Alpha 1
+App has been created
+
+Alpha 1.1
+Bugfix, redused size from 10Mb to 6Mb
+
+Alpha 1.2
+Bugfix, Added option to choose from other Forza titles listed on steam
+
+Alpha 1.3
+Minor Bugfix and optimizations
+
+Alpha 1.4
+Bugfix
+
+Alpha 1.5
+test on git
