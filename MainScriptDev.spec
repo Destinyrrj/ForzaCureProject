@@ -33,5 +33,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=[r'C:\Users\kosti\Downloads\icons8-forza-horizon-4-64.ico'],
+    icon=[r'"C:\Users\kosti\Pictures\icons8-forza-horizon-4-64.ico"'],
 )
